@@ -35,10 +35,15 @@ class map_view(QtWidgets.QMainWindow):
         self.web_view.loadFinished.connect(lambda: self.update_finished())
         self.start_datetime_edit = QtWidgets.QDateTimeEdit()
         self.end_datetime_edit = QtWidgets.QDateTimeEdit()
-
-        # load data
-        print("loading")
         self.runtime_ds = map_data()
+
+        self.read_db()
+        self.setCentralWidget(self.create_gui())
+
+    # put all db data into a runtime data structure
+    def read_db(self):
+        # TODO: it might be useful to calculate the time for interpolation points from their travel times here
+        print("started loading")
         db = sqlite3.connect("data/data_test.db")
         query_obs = "SELECT * FROM OBS"
         self.runtime_ds.data_obs = pd.read_sql_query(query_obs, db)
@@ -46,9 +51,8 @@ class map_view(QtWidgets.QMainWindow):
         self.runtime_ds.data_bw = pd.read_sql_query(query_bw, db)
         query_fw = "SELECT * FROM FW"
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
-        print("loading complete")
-
-        self.setCentralWidget(self.create_gui())
+        db.close()
+        print("loading done")
 
     # returns an object (currently "struct" of dataframes) which contains the data relevant for the given time
     def get_data_for_time_range(self, start_datetime: QtCore.QDateTime, end_datetime: QtCore.QDateTime):
@@ -57,11 +61,13 @@ class map_view(QtWidgets.QMainWindow):
 
         m_data = map_data()
 
+        # TODO: connect this to the runtime data structure
         db = sqlite3.connect("data/data_test.db")
 
         query_obs = "SELECT * FROM OBS WHERE CAST(time as INT) BETWEEN " + start_time_str + " AND " + end_time_str
         m_data.data_obs = pd.read_sql_query(query_obs, db)
 
+        # TODO: determine which interpolation data to load
         # TODO: make this work properly and preferably faster
         try:
             query_bw = "SELECT * FROM BW WHERE CAST(label as INT) BETWEEN " + str(
@@ -69,8 +75,8 @@ class map_view(QtWidgets.QMainWindow):
             m_data.data_bw = pd.read_sql_query(query_bw, db)
         except:
             print("loading interpolated data failed")
-
         db.close()
+
         return m_data
 
     # build a string compatible to the data we have from a QDateTime object
@@ -108,7 +114,7 @@ class map_view(QtWidgets.QMainWindow):
         #self.add_markers(m_data.data_obs, "#cf5a30")
         #self.add_markers(m_data.data_bw, "#55b33b")
 
-        self.draw_polygon(m_data.data_bw, "#55b33b")
+        self.draw_polygon(m_data.data_obs, "#55b33b")
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
@@ -125,6 +131,8 @@ class map_view(QtWidgets.QMainWindow):
         f.write(html)
         f.close()
 
+    # add a marker for each measurement in the given color
+    # If to many markers are created (around >5000), view will not render
     def add_markers(self, df, color):
         for index, row in df.iterrows():
             coords = [row['latitude'], row['longitude']]
@@ -132,6 +140,7 @@ class map_view(QtWidgets.QMainWindow):
                 location=coords, radius=5, color=color, fill=True, fillOpacity=1.0, fillColor=color
             ).add_to(self.fol_map)
 
+    # draw a convex polygon over the given points. Much faster than markers, though not as accurate
     def draw_polygon(self, df, color):
         lat_point_list = df['latitude'].tolist()
         lon_point_list = df['longitude'].tolist()
