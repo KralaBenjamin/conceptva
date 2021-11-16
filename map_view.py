@@ -3,11 +3,17 @@ import sys
 
 import xarray
 import folium
+import sqlite3
+import pandas as pd
 from PySide2 import QtWidgets, QtWebEngineWidgets, QtCore
 
 start_coords = [54.12, 8.37]
-min_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
-max_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 30), QtCore.QTime(23, 0))
+min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
+max_time = QtCore.QDateTime(QtCore.QDate(2013, 12, 31), QtCore.QTime(23, 59))
+
+# start and end times when launching the program
+begin_start_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
+begin_end_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 2), QtCore.QTime(0, 0))
 
 
 class map_view(QtWidgets.QMainWindow):
@@ -24,19 +30,16 @@ class map_view(QtWidgets.QMainWindow):
         self.setCentralWidget(self.create_gui())
 
     # returns an object (currently dataframe) which contains the data relevant for the given time
-    # TODO: This function can be overwritten with a DB access or another method of getting data
     def get_dateframe_for_time_string(self, start_datetime: QtCore.QDateTime, end_datetime: QtCore.QDateTime):
-        time_str = self.create_time_string(start_datetime)
-        if self.data_map.__contains__(time_str):
-            print("data in dict")
-            df = self.data_map[time_str]
-        else:
-            print("data not in dict")
-            df = xarray.open_dataset(
-                "https://opendap.hereon.de/opendap/data/cosyna/synopsis/synopsis_BW/BW_2013_06/synop_" + str(
-                    time_str) + ".nc")
-            df = df.to_dataframe()
-            self.data_map[time_str] = df
+        start_time_str = self.create_time_string(start_datetime)
+        end_time_str = self.create_time_string(end_datetime)
+
+        db = sqlite3.connect("data/data_test.db")
+
+        query = "SELECT * FROM OBS WHERE CAST(time as INT) BETWEEN " + start_time_str + " AND " + end_time_str
+        df = pd.read_sql_query(query, db)
+
+        db.close()
         return df
 
     # build a string compatible to the data we have from a QDateTime object
@@ -51,12 +54,17 @@ class map_view(QtWidgets.QMainWindow):
         if date_time.time().hour() < 10:
             time_str += "0"
         time_str += date_time.time().hour().__str__()
+        if date_time.time().minute() < 10:
+            time_str += "0"
+        time_str += date_time.time().minute().__str__()
         return time_str
 
     # update map when new time was selected
     def update_map(self):
+        self.date_label.setText("Updating...")
+
         start_datetime = self.start_datetime_edit.dateTime()
-        end_datetime = self.start_datetime_edit.dateTime()
+        end_datetime = self.end_datetime_edit.dateTime()
 
         # get data
         df = self.get_dateframe_for_time_string(start_datetime, end_datetime)
@@ -92,14 +100,14 @@ class map_view(QtWidgets.QMainWindow):
         # build start date time edit
         self.start_datetime_edit.setDateTimeRange(min_time, max_time)
         self.start_datetime_edit.setCalendarPopup(1)
-        self.start_datetime_edit.setDateTime(min_time)
+        self.start_datetime_edit.setDateTime(begin_start_time)
         self.start_datetime_edit.setMinimumWidth(120)
         self.start_datetime_edit.dateTimeChanged.connect(lambda: self.start_datetime_changed())
 
         # build end date time edit
-        self.end_datetime_edit.setDateTimeRange(min_time, max_time)
+        self.end_datetime_edit.setDateTimeRange(begin_start_time, max_time)
         self.end_datetime_edit.setCalendarPopup(1)
-        self.end_datetime_edit.setDateTime(min_time)
+        self.end_datetime_edit.setDateTime(begin_end_time)
         self.end_datetime_edit.setMinimumWidth(120)
 
         # build button
