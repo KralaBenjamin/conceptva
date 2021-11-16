@@ -6,6 +6,7 @@ import folium
 import sqlite3
 import pandas as pd
 from PySide2 import QtWidgets, QtWebEngineWidgets, QtCore
+from dataclasses import dataclass
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -15,6 +16,11 @@ max_time = QtCore.QDateTime(QtCore.QDate(2013, 12, 31), QtCore.QTime(23, 59))
 begin_start_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
 begin_end_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 2), QtCore.QTime(0, 0))
 
+@dataclass
+class map_data:
+    data_obs: pd.DataFrame = None
+    data_bw: pd.DataFrame = None
+
 
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
@@ -23,24 +29,31 @@ class map_view(QtWidgets.QMainWindow):
         self.date_label.setFixedHeight(20)
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
         self.web_view = QtWebEngineWidgets.QWebEngineView()
+        self.web_view.loadFinished.connect(lambda: self.update_finished())
         self.start_datetime_edit = QtWidgets.QDateTimeEdit()
         self.end_datetime_edit = QtWidgets.QDateTimeEdit()
         self.data_map = dict()
 
         self.setCentralWidget(self.create_gui())
 
-    # returns an object (currently dataframe) which contains the data relevant for the given time
+    # returns an object (currently "struct" of dataframes) which contains the data relevant for the given time
     def get_dateframe_for_time_string(self, start_datetime: QtCore.QDateTime, end_datetime: QtCore.QDateTime):
         start_time_str = self.create_time_string(start_datetime)
         end_time_str = self.create_time_string(end_datetime)
 
+        m_data = map_data()
+
         db = sqlite3.connect("data/data_test.db")
 
-        query = "SELECT * FROM OBS WHERE CAST(time as INT) BETWEEN " + start_time_str + " AND " + end_time_str
-        df = pd.read_sql_query(query, db)
+        query_obs = "SELECT * FROM OBS WHERE CAST(time as INT) BETWEEN " + start_time_str + " AND " + end_time_str
+        m_data.data_obs = pd.read_sql_query(query_obs, db)
+
+        query_bw = "SELECT * FROM BW WHERE CAST(label as INT) BETWEEN " + str(
+            int(m_data.data_obs['label'].min())) + " AND " + str(int(m_data.data_obs['label'].max()))
+        m_data.data_bw = pd.read_sql_query(query_bw, db)
 
         db.close()
-        return df
+        return m_data
 
     # build a string compatible to the data we have from a QDateTime object
     def create_time_string(self, date_time: QtCore.QDateTime):
@@ -61,29 +74,48 @@ class map_view(QtWidgets.QMainWindow):
 
     # update map when new time was selected
     def update_map(self):
+        # set label to updating
         self.date_label.setText("Updating...")
+        self.date_label.repaint()
 
         start_datetime = self.start_datetime_edit.dateTime()
         end_datetime = self.end_datetime_edit.dateTime()
 
         # get data
-        df = self.get_dateframe_for_time_string(start_datetime, end_datetime)
+        m_data = self.get_dateframe_for_time_string(start_datetime, end_datetime)
+        print("loaded")
 
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
         # place markers on map
-        for index, row in df.iterrows():
-            coords = [row['latitude'], row['longitude']]
-            folium.vector_layers.CircleMarker(
-                location=coords, radius=5, color="#ff0000", fill=True, fillOpacity=1.0, fillColor="#ff0000"
-            ).add_to(self.fol_map)
+        self.add_markers(m_data.data_obs, "#cf5a30")
+        self.add_markers(m_data.data_bw, "#55b33b")
+        print("painted")
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
         self.fol_map.location = start_coords
         self.fol_map.save(data, close_file=False)
-        self.web_view.setHtml(data.getvalue().decode())
+        html = data.getvalue().decode()
+        #self.write_html_to_file(html)
+        self.web_view.setHtml(html)
+        print("update done")
 
+    # for debugging
+    def write_html_to_file(self, html):
+        f = open("Test.html", "a")
+        f.truncate(0)
+        f.write(html)
+        f.close()
+
+    def add_markers(self, df, color):
+        for index, row in df.iterrows():
+            coords = [row['latitude'], row['longitude']]
+            folium.vector_layers.CircleMarker(
+                location=coords, radius=5, color=color, fill=True, fillOpacity=1.0, fillColor=color
+            ).add_to(self.fol_map)
+
+    def update_finished(self):
         # update label
         self.date_label.setText(
             "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.end_datetime_edit.dateTime().toString())
