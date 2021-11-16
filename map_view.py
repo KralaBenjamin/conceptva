@@ -57,9 +57,6 @@ class map_view(QtWidgets.QMainWindow):
     def update_map(self):
         start_datetime = self.start_datetime_edit.dateTime()
         end_datetime = self.start_datetime_edit.dateTime()
-        # TODO: make sure end is greater than start, abort if not
-        self.date_label.setText(
-            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.end_datetime_edit.dateTime().toString())
 
         # get data
         df = self.get_dateframe_for_time_string(start_datetime, end_datetime)
@@ -79,6 +76,13 @@ class map_view(QtWidgets.QMainWindow):
         self.fol_map.save(data, close_file=False)
         self.web_view.setHtml(data.getvalue().decode())
 
+        # update label
+        self.date_label.setText(
+            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.end_datetime_edit.dateTime().toString())
+
+    def start_datetime_changed(self):
+        self.end_datetime_edit.setDateTimeRange(self.start_datetime_edit.dateTime(), max_time)
+
     # create the GUI consisting of a map, a date-time selection field and an update button
     def create_gui(self):
         # build upper layout
@@ -89,28 +93,39 @@ class map_view(QtWidgets.QMainWindow):
         self.start_datetime_edit.setDateTimeRange(min_time, max_time)
         self.start_datetime_edit.setCalendarPopup(1)
         self.start_datetime_edit.setDateTime(min_time)
+        self.start_datetime_edit.setMinimumWidth(120)
+        self.start_datetime_edit.dateTimeChanged.connect(lambda: self.start_datetime_changed())
 
         # build end date time edit
         self.end_datetime_edit.setDateTimeRange(min_time, max_time)
         self.end_datetime_edit.setCalendarPopup(1)
         self.end_datetime_edit.setDateTime(min_time)
+        self.end_datetime_edit.setMinimumWidth(120)
 
         # build button
         button = QtWidgets.QPushButton("Update")
         button.clicked.connect(lambda: self.update_map())
 
+        # build labels
+        from_label = QtWidgets.QLabel("Analyze Data from: ")
+        from_label.setFixedHeight(20)
+        until_label = QtWidgets.QLabel(" until: ")
+        until_label.setFixedHeight(20)
+
         # build lower layout
-        # TODO: format this properly
         control_layout = QtWidgets.QHBoxLayout()
+        control_layout.addWidget(from_label)
         control_layout.addWidget(self.start_datetime_edit)
+        control_layout.addWidget(until_label)
         control_layout.addWidget(self.end_datetime_edit)
         control_layout.addWidget(button)
+        control_layout.addStretch(1)
 
         # build main widget
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QVBoxLayout()
-        main_layout.addLayout(status_layout)
         main_layout.addWidget(self.web_view)
+        main_layout.addLayout(status_layout)
         main_layout.addLayout(control_layout)
         main_widget.setLayout(main_layout)
 
