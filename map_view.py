@@ -1,5 +1,6 @@
 import io
 import sys
+import time
 
 import folium
 import sqlite3
@@ -25,6 +26,24 @@ class map_data:
     data_fw: pd.DataFrame = pd.DataFrame()
 
 
+# build a string compatible to the data we have from a QDateTime object
+def datetime_to_timestring(date_time: QtCore.QDateTime):
+    time_str = date_time.date().year().__str__()
+    if date_time.date().month() < 10:
+        time_str += "0"
+    time_str += date_time.date().month().__str__()
+    if date_time.date().day() < 10:
+        time_str += "0"
+    time_str += date_time.date().day().__str__()
+    if date_time.time().hour() < 10:
+        time_str += "0"
+    time_str += date_time.time().hour().__str__()
+    if date_time.time().minute() < 10:
+        time_str += "0"
+    time_str += date_time.time().minute().__str__()
+    return time_str
+
+
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -43,7 +62,8 @@ class map_view(QtWidgets.QMainWindow):
     # put all db data into a runtime data structure
     def read_db(self):
         # TODO: it might be useful to calculate the time for interpolation points from their travel times here
-        print("started loading")
+        print("started loading...")
+        start_time = time.time()
         db = sqlite3.connect("data/data_test.db")
         query_obs = "SELECT * FROM OBS"
         self.runtime_ds.data_obs = pd.read_sql_query(query_obs, db)
@@ -52,49 +72,24 @@ class map_view(QtWidgets.QMainWindow):
         query_fw = "SELECT * FROM FW"
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
         db.close()
-        print("loading done")
+        print("loading done in " + str(time.time() - start_time) + " seconds")
 
     # returns an object (currently "struct" of dataframes) which contains the data relevant for the given time
     def get_data_for_time_range(self, start_datetime: QtCore.QDateTime, end_datetime: QtCore.QDateTime):
-        start_time_str = self.create_time_string(start_datetime)
-        end_time_str = self.create_time_string(end_datetime)
+        start_time_str = datetime_to_timestring(start_datetime)
+        end_time_str = datetime_to_timestring(end_datetime)
 
         m_data = map_data()
 
-        # TODO: connect this to the runtime data structure
-        db = sqlite3.connect("data/data_test.db")
-
-        query_obs = "SELECT * FROM OBS WHERE CAST(time as INT) BETWEEN " + start_time_str + " AND " + end_time_str
-        m_data.data_obs = pd.read_sql_query(query_obs, db)
-
-        # TODO: determine which interpolation data to load
-        # TODO: make this work properly and preferably faster
-        try:
-            query_bw = "SELECT * FROM BW WHERE CAST(label as INT) BETWEEN " + str(
-                int(m_data.data_obs['label'].min())) + " AND " + str(int(m_data.data_obs['label'].max()))
-            m_data.data_bw = pd.read_sql_query(query_bw, db)
-        except:
-            print("loading interpolated data failed")
-        db.close()
+        m_data.data_obs = self.runtime_ds.data_obs[
+            self.runtime_ds.data_obs["time"].between(str.encode(start_time_str), str.encode(end_time_str))]
+        # TODO: this is wrong, needs to be done based on time
+        m_data.data_bw = self.runtime_ds.data_bw[
+            self.runtime_ds.data_bw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
+        m_data.data_bw = self.runtime_ds.data_fw[
+            self.runtime_ds.data_fw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
 
         return m_data
-
-    # build a string compatible to the data we have from a QDateTime object
-    def create_time_string(self, date_time: QtCore.QDateTime):
-        time_str = date_time.date().year().__str__()
-        if date_time.date().month() < 10:
-            time_str += "0"
-        time_str += date_time.date().month().__str__()
-        if date_time.date().day() < 10:
-            time_str += "0"
-        time_str += date_time.date().day().__str__()
-        if date_time.time().hour() < 10:
-            time_str += "0"
-        time_str += date_time.time().hour().__str__()
-        if date_time.time().minute() < 10:
-            time_str += "0"
-        time_str += date_time.time().minute().__str__()
-        return time_str
 
     # update map when new time was selected
     def update_map(self):
@@ -111,8 +106,8 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
         # place markers on map
-        #self.add_markers(m_data.data_obs, "#cf5a30")
-        #self.add_markers(m_data.data_bw, "#55b33b")
+        # self.add_markers(m_data.data_obs, "#cf5a30")
+        # self.add_markers(m_data.data_bw, "#55b33b")
 
         self.draw_polygon(m_data.data_obs, "#55b33b")
 
@@ -121,11 +116,10 @@ class map_view(QtWidgets.QMainWindow):
         self.fol_map.location = start_coords
         self.fol_map.save(data, close_file=False)
         html = data.getvalue().decode()
-        self.write_html_to_file(html)
         self.web_view.setHtml(html)
 
     # for debugging
-    def write_html_to_file(self, html):
+    def write_html_to_file(self, html: str):
         f = open("Test.html", "a")
         f.truncate(0)
         f.write(html)
@@ -133,7 +127,7 @@ class map_view(QtWidgets.QMainWindow):
 
     # add a marker for each measurement in the given color
     # If to many markers are created (around >5000), view will not render
-    def add_markers(self, df, color):
+    def add_markers(self, df: pd.DataFrame, color: str):
         for index, row in df.iterrows():
             coords = [row['latitude'], row['longitude']]
             folium.vector_layers.CircleMarker(
@@ -141,7 +135,7 @@ class map_view(QtWidgets.QMainWindow):
             ).add_to(self.fol_map)
 
     # draw a convex polygon over the given points. Much faster than markers, though not as accurate
-    def draw_polygon(self, df, color):
+    def draw_polygon(self, df: pd.DataFrame, color: str):
         lat_point_list = df['latitude'].tolist()
         lon_point_list = df['longitude'].tolist()
 
