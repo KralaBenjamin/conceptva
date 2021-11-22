@@ -44,6 +44,14 @@ def datetime_to_timestring(date_time: QtCore.QDateTime):
     return time_str
 
 
+# for debugging
+def write_html_to_file(html: str):
+    f = open("Test.html", "a")
+    f.truncate(0)
+    f.write(html)
+    f.close()
+
+
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -86,7 +94,7 @@ class map_view(QtWidgets.QMainWindow):
         # TODO: this is wrong, needs to be done based on time
         m_data.data_bw = self.runtime_ds.data_bw[
             self.runtime_ds.data_bw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
-        m_data.data_bw = self.runtime_ds.data_fw[
+        m_data.data_fw = self.runtime_ds.data_fw[
             self.runtime_ds.data_fw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
 
         return m_data
@@ -105,10 +113,9 @@ class map_view(QtWidgets.QMainWindow):
 
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
-        # place markers on map
-        # self.add_markers(m_data.data_obs, "#cf5a30")
-        # self.add_markers(m_data.data_bw, "#55b33b")
 
+        self.draw_polygon(m_data.data_bw, "#cf5a30")
+        self.draw_polygon(m_data.data_fw, "#de59c1")
         self.draw_polygon(m_data.data_obs, "#55b33b")
 
         # convert map to bytes and set html to webview
@@ -118,12 +125,6 @@ class map_view(QtWidgets.QMainWindow):
         html = data.getvalue().decode()
         self.web_view.setHtml(html)
 
-    # for debugging
-    def write_html_to_file(self, html: str):
-        f = open("Test.html", "a")
-        f.truncate(0)
-        f.write(html)
-        f.close()
 
     # add a marker for each measurement in the given color
     # If to many markers are created (around >5000), view will not render
@@ -136,12 +137,25 @@ class map_view(QtWidgets.QMainWindow):
 
     # draw a convex polygon over the given points. Much faster than markers, though not as accurate
     def draw_polygon(self, df: pd.DataFrame, color: str):
-        lat_point_list = df['latitude'].tolist()
-        lon_point_list = df['longitude'].tolist()
+        try:
+            lat_point_list = df['latitude'].tolist()
+            lon_point_list = df['longitude'].tolist()
+        except:
+            # empty df or some other error
+            print("Couldn't draw polygon")
+            return
 
         polygon_geom = Polygon(zip(lon_point_list, lat_point_list))
         polygon_geom = polygon_geom.convex_hull
-        folium.GeoJson(polygon_geom).add_to(self.fol_map)
+        folium.GeoJson(
+            polygon_geom,
+            style_function=lambda feature: {
+                'fillColor': color,
+                'color': color,
+                'weight': 1,
+                'fillOpacity': 0.5,
+            }
+        ).add_to(self.fol_map)
 
     def update_finished(self):
         # update label
