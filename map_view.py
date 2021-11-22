@@ -43,6 +43,19 @@ def datetime_to_timestring(date_time: QtCore.QDateTime):
     time_str += date_time.time().minute().__str__()
     return time_str
 
+# build QDateTime from time string
+def timestring_to_datetime(time_str: str):
+    date_time = QtCore.QDateTime()
+    date_time.setDate(QtCore.QDate(
+        int(time_str[0:4]),
+        int(time_str[4:6]),
+        int(time_str[6:8])
+    ))
+    date_time.setTime(QtCore.QTime(
+        int(time_str[8:10]),
+        int(time_str[10:12])
+    ))
+    return date_time
 
 # for debugging
 def write_html_to_file(html: str):
@@ -69,7 +82,6 @@ class map_view(QtWidgets.QMainWindow):
 
     # put all db data into a runtime data structure
     def read_db(self):
-        # TODO: it might be useful to calculate the time for interpolation points from their travel times here
         print("started loading...")
         start_time = time.time()
         db = sqlite3.connect("data/data_test.db")
@@ -91,19 +103,18 @@ class map_view(QtWidgets.QMainWindow):
 
         m_data.data_obs = self.runtime_ds.data_obs[
             self.runtime_ds.data_obs["time"].between(str.encode(start_time_str), str.encode(end_time_str))]
-        # TODO: this is wrong, needs to be done based on time
         m_data.data_bw = self.runtime_ds.data_bw[
-            self.runtime_ds.data_bw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
+            self.runtime_ds.data_bw["initial_time"].between(int(start_time_str), int(end_time_str))]
         m_data.data_fw = self.runtime_ds.data_fw[
-            self.runtime_ds.data_fw["label"].between(m_data.data_obs["label"].min(), m_data.data_obs["label"].max())]
+            self.runtime_ds.data_fw["initial_time"].between(int(start_time_str), int(end_time_str))]
 
         return m_data
 
     # update map when new time was selected
     def update_map(self):
+        # TODO: make this work properly
         # set label to updating
         self.date_label.setText("Updating...")
-        self.date_label.repaint()
 
         start_datetime = self.start_datetime_edit.dateTime()
         end_datetime = self.end_datetime_edit.dateTime()
