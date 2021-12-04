@@ -7,8 +7,9 @@ import sqlite3
 import pandas as pd
 from PySide2 import QtWidgets, QtWebEngineWidgets, QtCore
 from dataclasses import dataclass
-import geopandas as gpd
 from shapely.geometry import Polygon
+from shapely.geometry import shape
+import geojson
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -75,9 +76,11 @@ class map_view(QtWidgets.QMainWindow):
         self.web_view.loadFinished.connect(lambda: self.update_finished())
         self.start_datetime_edit = QtWidgets.QDateTimeEdit()
         self.end_datetime_edit = QtWidgets.QDateTimeEdit()
+        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.runtime_ds = map_data()
 
         self.read_db()
+        self.read_polygon()
         self.setCentralWidget(self.create_gui())
 
     # put all db data into a runtime data structure
@@ -93,6 +96,12 @@ class map_view(QtWidgets.QMainWindow):
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
         db.close()
         print("loading done in " + str(time.time() - start_time) + " seconds")
+
+    # read polygon data needed to construct visualizations
+    def read_polygon(self):
+        with open("data/GermanyPolygon.json") as f:
+            gj = geojson.load(f)
+        self.ger_polygon = shape(gj)
 
     # returns an object (currently "struct" of dataframes) which contains the data relevant for the given time
     def get_data_for_time_range(self, start_datetime: QtCore.QDateTime, end_datetime: QtCore.QDateTime):
@@ -158,6 +167,7 @@ class map_view(QtWidgets.QMainWindow):
 
         polygon_geom = Polygon(zip(lon_point_list, lat_point_list))
         polygon_geom = polygon_geom.convex_hull
+        polygon_geom = polygon_geom.difference(self.ger_polygon)
         folium.GeoJson(
             polygon_geom,
             style_function=lambda feature: {
@@ -205,6 +215,12 @@ class map_view(QtWidgets.QMainWindow):
         until_label = QtWidgets.QLabel(" until: ")
         until_label.setFixedHeight(20)
 
+        # build slider stuff
+        self.slider.setFixedWidth(200)
+        slider_current_label = QtWidgets.QLabel("Selected Salinity:")
+        slider_current_label.setFixedHeight(20)
+        salinity_spinbox = QtWidgets.QDoubleSpinBox()
+
         # build lower layout
         control_layout = QtWidgets.QHBoxLayout()
         control_layout.addWidget(from_label)
@@ -213,6 +229,9 @@ class map_view(QtWidgets.QMainWindow):
         control_layout.addWidget(self.end_datetime_edit)
         control_layout.addWidget(button)
         control_layout.addStretch(1)
+        control_layout.addWidget(slider_current_label)
+        control_layout.addWidget(salinity_spinbox)
+        control_layout.addWidget(self.slider)
 
         # build main widget
         main_widget = QtWidgets.QWidget()
