@@ -79,14 +79,16 @@ class map_view(QtWidgets.QMainWindow):
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.runtime_ds = map_data()
 
+        print("started loading...")
+        start_time = time.time()
         self.read_db()
         self.read_polygon()
+        print("loading done in " + str(time.time() - start_time) + " seconds")
+
         self.setCentralWidget(self.create_gui())
 
     # put all db data into a runtime data structure
     def read_db(self):
-        print("started loading...")
-        start_time = time.time()
         db = sqlite3.connect("data/data_test.db")
         query_obs = "SELECT * FROM OBS"
         self.runtime_ds.data_obs = pd.read_sql_query(query_obs, db)
@@ -95,7 +97,6 @@ class map_view(QtWidgets.QMainWindow):
         query_fw = "SELECT * FROM FW"
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
         db.close()
-        print("loading done in " + str(time.time() - start_time) + " seconds")
 
     # read polygon data needed to construct visualizations
     def read_polygon(self):
@@ -134,9 +135,10 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        self.draw_polygon(m_data.data_bw, "#cf5a30")
-        self.draw_polygon(m_data.data_fw, "#de59c1")
-        self.draw_polygon(m_data.data_obs, "#55b33b")
+        #self.draw_polygon(m_data.data_bw, "#cf5a30")
+        #self.draw_polygon(m_data.data_fw, "#de59c1")
+        #self.draw_polygon(m_data.data_obs, "#55b33b")
+        self.draw_contour_map(m_data, 1.0)
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
@@ -177,6 +179,22 @@ class map_view(QtWidgets.QMainWindow):
                 'fillOpacity': 0.5,
             }
         ).add_to(self.fol_map)
+
+    # draw contour map
+    def draw_contour_map(self, md: map_data, salinity_val: float):
+        # construct dataframe with salinity
+        df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
+        self.process_extrapolated_data(md.data_bw)
+        self.process_extrapolated_data(md.data_fw)
+
+    def process_extrapolated_data(self, df: pd.DataFrame):
+        sal_list = []
+        for row in df.iterrows():
+            print(row)
+            id = row['label']
+            print(id)
+            sal_list.append(self.runtime_ds.data_obs['label'==id]['sensor_1'])
+        print(sal_list)
 
     def update_finished(self):
         # update label
