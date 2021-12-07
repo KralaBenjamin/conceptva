@@ -191,9 +191,9 @@ class map_view(QtWidgets.QMainWindow):
         sal_list = []
         for row in df.iterrows():
             print(row)
-            id = row['label']
+            #id = row['label']
             print(id)
-            sal_list.append(self.runtime_ds.data_obs['label'==id]['sensor_1'])
+            #sal_list.append(self.runtime_ds.data_obs['label'==id]['sensor_1'])
         print(sal_list)
 
     def update_finished(self):
