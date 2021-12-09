@@ -10,6 +10,11 @@ from dataclasses import dataclass
 from shapely.geometry import Polygon
 from shapely.geometry import shape
 import geojson
+import geojsoncontour
+import numpy
+import branca
+from scipy.interpolate import griddata
+import matplotlib.pyplot as plt
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -17,7 +22,7 @@ max_time = QtCore.QDateTime(QtCore.QDate(2013, 12, 31), QtCore.QTime(23, 59))
 
 # start and end times when launching the program
 begin_start_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
-begin_end_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 2), QtCore.QTime(0, 0))
+begin_end_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(12, 0))
 
 
 @dataclass
@@ -44,6 +49,7 @@ def datetime_to_timestring(date_time: QtCore.QDateTime):
     time_str += date_time.time().minute().__str__()
     return time_str
 
+
 # build QDateTime from time string
 def timestring_to_datetime(time_str: str):
     date_time = QtCore.QDateTime()
@@ -57,6 +63,7 @@ def timestring_to_datetime(time_str: str):
         int(time_str[10:12])
     ))
     return date_time
+
 
 # for debugging
 def write_html_to_file(html: str):
@@ -135,10 +142,10 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        #self.draw_polygon(m_data.data_bw, "#cf5a30")
-        #self.draw_polygon(m_data.data_fw, "#de59c1")
-        #self.draw_polygon(m_data.data_obs, "#55b33b")
-        self.draw_contour_map(m_data, 1.0)
+        # self.draw_polygon(m_data.data_bw, "#cf5a30")
+        # self.draw_polygon(m_data.data_fw, "#de59c1")
+        # self.draw_polygon(m_data.data_obs, "#55b33b")
+        self.draw_contour_map(m_data, 25.0)
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
@@ -146,7 +153,6 @@ class map_view(QtWidgets.QMainWindow):
         self.fol_map.save(data, close_file=False)
         html = data.getvalue().decode()
         self.web_view.setHtml(html)
-
 
     # add a marker for each measurement in the given color
     # If to many markers are created (around >5000), view will not render
@@ -181,20 +187,72 @@ class map_view(QtWidgets.QMainWindow):
         ).add_to(self.fol_map)
 
     # draw contour map
-    def draw_contour_map(self, md: map_data, salinity_val: float):
+    def draw_contour_map(self, md: map_data, sal_val: float):
         # construct dataframe with salinity
         df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
         self.process_extrapolated_data(md.data_bw)
+        md.data_bw = md.data_bw[['latitude', 'longitude', 'sensor_1']]
         self.process_extrapolated_data(md.data_fw)
+        md.data_fw = md.data_fw[['latitude', 'longitude', 'sensor_1']]
 
+        df = df.append(md.data_bw)
+        df = df.append(md.data_fw)
+
+        # color stuff for the map
+        colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
+        sal_min = df['sensor_1'].min()
+        sal_max = df['sensor_1'].max()
+        # make sure salinity is between min and max
+        # TODO: look into this
+        sal_val = numpy.clip(sal_val, sal_min, sal_max)
+        # scale values for colors
+        levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val)]
+        col_map = branca.colormap.LinearColormap(colors, vmin=sal_min, vmax=sal_max).to_step(index=levels)
+
+        # data to lists
+        x_data = numpy.asarray(df.longitude.tolist())
+        y_data = numpy.asarray(df.latitude.tolist())
+        z_data = numpy.asarray(df.sensor_1.tolist())
+
+        # build grid
+        x_lin = numpy.linspace(numpy.min(x_data), numpy.max(x_data), 500)
+        y_lin = numpy.linspace(numpy.min(y_data), numpy.max(y_data), 500)
+        x_mesh, y_mesh = numpy.meshgrid(x_lin, y_lin)
+
+        # add sensor values to grid
+        z_mesh = griddata((x_data, y_data), z_data, (x_mesh, y_mesh), method='linear')
+
+        # TODO: Gaussian filter ?
+
+        contourf = plt.contourf(x_mesh, y_mesh, z_mesh, levels, alpha=0.5, colors=colors, linestyles='None', vmin=sal_min,
+                                vmax=sal_max)
+
+        gj = geojsoncontour.contourf_to_geojson(
+            contourf=contourf,
+            min_angle_deg=3.0,
+            ndigits=5,
+            stroke_width=1,
+            fill_opacity=0.5)
+
+        folium.GeoJson(
+            gj,
+            style_function=lambda x: {
+                'color': x['properties']['stroke'],
+                'weight': x['properties']['stroke-width'],
+                'fillColor': x['properties']['fill'],
+                'opacity': 0.6,
+            }).add_to(self.fol_map)
+
+    # add salinity values to extrapolated points
+    # TODO: this is slow as hell
     def process_extrapolated_data(self, df: pd.DataFrame):
         sal_list = []
-        for row in df.iterrows():
-            print(row)
-            #id = row['label']
-            print(id)
-            #sal_list.append(self.runtime_ds.data_obs['label'==id]['sensor_1'])
-        print(sal_list)
+        for index, row in df.iterrows():
+            id = row['label']
+            mask = self.runtime_ds.data_obs['label'].values == id
+            sal = self.runtime_ds.data_obs[mask]['sensor_1'].values[0]
+            sal_list.append(sal)
+        df['sensor_1'] = sal_list
 
     def update_finished(self):
         # update label
