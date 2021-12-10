@@ -101,8 +101,10 @@ class map_view(QtWidgets.QMainWindow):
         self.runtime_ds.data_obs = pd.read_sql_query(query_obs, db)
         query_bw = "SELECT * FROM BW"
         self.runtime_ds.data_bw = pd.read_sql_query(query_bw, db)
+        self.process_extrapolated_data(self.runtime_ds.data_bw)
         query_fw = "SELECT * FROM FW"
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
+        self.process_extrapolated_data(self.runtime_ds.data_fw)
         db.close()
 
     # read polygon data needed to construct visualizations
@@ -190,9 +192,9 @@ class map_view(QtWidgets.QMainWindow):
     def draw_contour_map(self, md: map_data, sal_val: float):
         # construct dataframe with salinity
         df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
-        self.process_extrapolated_data(md.data_bw)
+        #self.process_extrapolated_data(md.data_bw)
         md.data_bw = md.data_bw[['latitude', 'longitude', 'sensor_1']]
-        self.process_extrapolated_data(md.data_fw)
+        #self.process_extrapolated_data(md.data_fw)
         md.data_fw = md.data_fw[['latitude', 'longitude', 'sensor_1']]
 
         df = df.append(md.data_bw)
@@ -245,6 +247,7 @@ class map_view(QtWidgets.QMainWindow):
 
     # add salinity values to extrapolated points
     # TODO: this is slow as hell
+    # TODO: should probably be done when loading db
     def process_extrapolated_data(self, df: pd.DataFrame):
         sal_list = []
         for index, row in df.iterrows():
