@@ -1,10 +1,12 @@
 import io
+import json
 import sys
 import time
 
 import folium
 import sqlite3
 import pandas as pd
+import shapely.geometry
 from PySide2 import QtWidgets, QtWebEngineWidgets, QtCore
 from dataclasses import dataclass
 from shapely.geometry import Polygon
@@ -16,6 +18,8 @@ import branca
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 import math
+import scipy as sp
+import scipy.ndimage
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -77,6 +81,8 @@ def write_html_to_file(html: str):
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.gaussfilter_label = QtWidgets.QLabel("Smoothening: ")
+        self.gaussfilter_spinbox = QtWidgets.QSpinBox()
         self.salinity_spinbox = QtWidgets.QDoubleSpinBox()
         self.date_label = QtWidgets.QLabel()
         self.date_label.setFixedHeight(20)
@@ -154,7 +160,8 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        sal_val = self.slider.value()
+        # draw contour map
+        sal_val = self.salinity_spinbox.value()
         self.draw_contour_map(m_data, sal_val)
 
         # convert map to bytes and set html to webview
@@ -219,11 +226,13 @@ class map_view(QtWidgets.QMainWindow):
             levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
             colors = ['#b5212f', '#de7881']
         else:
-            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val)]
+            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val),
+                      sal_max]
             colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
 
         # scale values for colors
-        col_map = branca.colormap.LinearColormap(colors, vmin=sal_min, vmax=sal_max).to_step(index=levels)
+        col_map = branca.colormap.StepColormap(colors, vmin=sal_min, vmax=sal_max, index=levels)
+        col_map.caption = "Salinity in PSU"
 
         # data to lists
         x_data = numpy.asarray(df.longitude.tolist())
@@ -238,7 +247,11 @@ class map_view(QtWidgets.QMainWindow):
         # add sensor values to grid
         z_mesh = griddata((x_data, y_data), z_data, (x_mesh, y_mesh), method='linear')
 
-        # TODO: Gaussian filter ?
+        # optional gaussian filter to smoothen contour map
+        if(self.gaussfilter_spinbox.value() > 0):
+            gauss_strength = self.gaussfilter_spinbox.value()
+            sigma = [gauss_strength, gauss_strength]
+            z_mesh = sp.ndimage.filters.gaussian_filter(z_mesh, sigma, mode='constant')
 
         contourf = plt.contourf(x_mesh, y_mesh, z_mesh, levels, alpha=0.5, colors=colors, linestyles='None',
                                 vmin=sal_min,
@@ -259,6 +272,9 @@ class map_view(QtWidgets.QMainWindow):
                 'fillColor': x['properties']['fill'],
                 'opacity': 0.6,
             }).add_to(self.fol_map)
+
+        # add legend
+        self.fol_map.add_child(col_map)
 
     # add salinity values to extrapolated points
     # TODO: this is slow as hell
@@ -282,10 +298,6 @@ class map_view(QtWidgets.QMainWindow):
 
     # create the GUI consisting of a map, a date-time selection field and an update button
     def create_gui(self):
-        # build upper layout
-        status_layout = QtWidgets.QHBoxLayout()
-        status_layout.addWidget(self.date_label)
-
         # build start date time edit
         self.start_datetime_edit.setDateTimeRange(min_time, max_time)
         self.start_datetime_edit.setCalendarPopup(1)
@@ -311,8 +323,8 @@ class map_view(QtWidgets.QMainWindow):
 
         # build slider stuff
         self.slider.setFixedWidth(300)
-        self.slider.setMinimum(self.sal_min_global)
-        self.slider.setMaximum(self.sal_max_global)
+        self.slider.setMinimum(self.sal_min_global * 100.0)
+        self.slider.setMaximum(self.sal_max_global * 100.0)
         self.slider.valueChanged.connect(lambda: self.salinity_changed(1))
         slider_current_label = QtWidgets.QLabel("Selected Salinity:")
         slider_current_label.setFixedHeight(20)
@@ -320,6 +332,21 @@ class map_view(QtWidgets.QMainWindow):
         self.salinity_spinbox.setMaximum(self.sal_max_global)
         self.salinity_spinbox.valueChanged.connect(lambda: self.salinity_changed(0))
         self.salinity_spinbox.setValue(25.0)
+
+        # build display settings
+        self.gaussfilter_label.setFixedHeight(20)
+        self.gaussfilter_spinbox.setMinimum(0)
+        self.gaussfilter_spinbox.setMaximum(5)
+        self.gaussfilter_spinbox.setToolTip("The amount by which the contour map is smoothened. 0 means no "
+                                            "smoothening, while 5 is the highest amount. The smoothening "
+                                            "effect is achieved through a Gaussian blur.")
+
+        # build upper layout
+        status_layout = QtWidgets.QHBoxLayout()
+        status_layout.addWidget(self.date_label)
+        status_layout.addStretch(1)
+        status_layout.addWidget(self.gaussfilter_label)
+        status_layout.addWidget(self.gaussfilter_spinbox)
 
         # build lower layout
         control_layout = QtWidgets.QHBoxLayout()
@@ -347,10 +374,10 @@ class map_view(QtWidgets.QMainWindow):
     def salinity_changed(self, on_slider: bool):
         if on_slider:
             if self.salinity_spinbox.value != self.slider.value:
-                self.salinity_spinbox.setValue(self.slider.value())
+                self.salinity_spinbox.setValue(self.slider.value() / 100.0)
         else:
             if self.salinity_spinbox.value != self.slider.value:
-                self.slider.setValue(self.salinity_spinbox.value())
+                self.slider.setValue(self.salinity_spinbox.value() * 100.0)
 
 
 if __name__ == "__main__":
