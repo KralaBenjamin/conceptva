@@ -15,6 +15,7 @@ import numpy
 import branca
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
+import math
 
 start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
@@ -76,6 +77,7 @@ def write_html_to_file(html: str):
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.salinity_spinbox = QtWidgets.QDoubleSpinBox()
         self.date_label = QtWidgets.QLabel()
         self.date_label.setFixedHeight(20)
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
@@ -101,11 +103,17 @@ class map_view(QtWidgets.QMainWindow):
         self.runtime_ds.data_obs = pd.read_sql_query(query_obs, db)
         query_bw = "SELECT * FROM BW"
         self.runtime_ds.data_bw = pd.read_sql_query(query_bw, db)
-        #self.process_extrapolated_data(self.runtime_ds.data_bw)
         query_fw = "SELECT * FROM FW"
         self.runtime_ds.data_fw = pd.read_sql_query(query_fw, db)
-        #self.process_extrapolated_data(self.runtime_ds.data_fw)
         db.close()
+
+        # get min and max sal values
+        self.sal_max_global = math.ceil(max(self.runtime_ds.data_obs['sensor_1'].max(),
+                                            self.runtime_ds.data_bw['sensor_1'].max(),
+                                            self.runtime_ds.data_fw['sensor_1'].max()))
+        self.sal_min_global = math.floor(min(self.runtime_ds.data_obs['sensor_1'].min(),
+                                             self.runtime_ds.data_bw['sensor_1'].min(),
+                                             self.runtime_ds.data_fw['sensor_1'].min()))
 
     # read polygon data needed to construct visualizations
     def read_polygon(self):
@@ -131,6 +139,8 @@ class map_view(QtWidgets.QMainWindow):
 
     # update map when new time was selected
     def update_map(self):
+        print("started updating...")
+        start_time = time.time()
         # TODO: make this work properly
         # set label to updating
         self.date_label.setText("Updating...")
@@ -144,17 +154,17 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        # self.draw_polygon(m_data.data_bw, "#cf5a30")
-        # self.draw_polygon(m_data.data_fw, "#de59c1")
-        # self.draw_polygon(m_data.data_obs, "#55b33b")
-        self.draw_contour_map(m_data, 25.0)
+        sal_val = self.slider.value()
+        self.draw_contour_map(m_data, sal_val)
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
         self.fol_map.location = start_coords
         self.fol_map.save(data, close_file=False)
         html = data.getvalue().decode()
+        write_html_to_file(html)
         self.web_view.setHtml(html)
+        print("updating done in " + str(time.time() - start_time) + " seconds")
 
     # add a marker for each measurement in the given color
     # If to many markers are created (around >5000), view will not render
@@ -192,23 +202,27 @@ class map_view(QtWidgets.QMainWindow):
     def draw_contour_map(self, md: map_data, sal_val: float):
         # construct dataframe with salinity
         df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
-        #self.process_extrapolated_data(md.data_bw)
         md.data_bw = md.data_bw[['latitude', 'longitude', 'sensor_1']]
-        #self.process_extrapolated_data(md.data_fw)
         md.data_fw = md.data_fw[['latitude', 'longitude', 'sensor_1']]
 
         df = df.append(md.data_bw)
         df = df.append(md.data_fw)
 
         # color stuff for the map
-        colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
         sal_min = df['sensor_1'].min()
         sal_max = df['sensor_1'].max()
         # make sure salinity is between min and max
-        # TODO: look into this
-        sal_val = numpy.clip(sal_val, sal_min, sal_max)
+        if (sal_val < sal_min):
+            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            colors = ['#77b5d4', '#06618f']
+        elif (sal_val > sal_max):
+            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            colors = ['#b5212f', '#de7881']
+        else:
+            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val)]
+            colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
+
         # scale values for colors
-        levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val)]
         col_map = branca.colormap.LinearColormap(colors, vmin=sal_min, vmax=sal_max).to_step(index=levels)
 
         # data to lists
@@ -226,7 +240,8 @@ class map_view(QtWidgets.QMainWindow):
 
         # TODO: Gaussian filter ?
 
-        contourf = plt.contourf(x_mesh, y_mesh, z_mesh, levels, alpha=0.5, colors=colors, linestyles='None', vmin=sal_min,
+        contourf = plt.contourf(x_mesh, y_mesh, z_mesh, levels, alpha=0.5, colors=colors, linestyles='None',
+                                vmin=sal_min,
                                 vmax=sal_max)
 
         gj = geojsoncontour.contourf_to_geojson(
@@ -295,10 +310,16 @@ class map_view(QtWidgets.QMainWindow):
         until_label.setFixedHeight(20)
 
         # build slider stuff
-        self.slider.setFixedWidth(200)
+        self.slider.setFixedWidth(300)
+        self.slider.setMinimum(self.sal_min_global)
+        self.slider.setMaximum(self.sal_max_global)
+        self.slider.valueChanged.connect(lambda: self.salinity_changed(1))
         slider_current_label = QtWidgets.QLabel("Selected Salinity:")
         slider_current_label.setFixedHeight(20)
-        salinity_spinbox = QtWidgets.QDoubleSpinBox()
+        self.salinity_spinbox.setMinimum(self.sal_min_global)
+        self.salinity_spinbox.setMaximum(self.sal_max_global)
+        self.salinity_spinbox.valueChanged.connect(lambda: self.salinity_changed(0))
+        self.salinity_spinbox.setValue(25.0)
 
         # build lower layout
         control_layout = QtWidgets.QHBoxLayout()
@@ -309,7 +330,7 @@ class map_view(QtWidgets.QMainWindow):
         control_layout.addWidget(button)
         control_layout.addStretch(1)
         control_layout.addWidget(slider_current_label)
-        control_layout.addWidget(salinity_spinbox)
+        control_layout.addWidget(self.salinity_spinbox)
         control_layout.addWidget(self.slider)
 
         # build main widget
@@ -322,6 +343,14 @@ class map_view(QtWidgets.QMainWindow):
 
         self.update_map()
         return main_widget
+
+    def salinity_changed(self, on_slider: bool):
+        if on_slider:
+            if self.salinity_spinbox.value != self.slider.value:
+                self.salinity_spinbox.setValue(self.slider.value())
+        else:
+            if self.salinity_spinbox.value != self.slider.value:
+                self.slider.setValue(self.salinity_spinbox.value())
 
 
 if __name__ == "__main__":
