@@ -78,9 +78,22 @@ def write_html_to_file(html: str):
     f.close()
 
 
+def create_salinity_df(md: map_data):
+    # construct dataframe with salinity
+    df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
+    md.data_bw = md.data_bw[['latitude', 'longitude', 'sensor_1']]
+    md.data_fw = md.data_fw[['latitude', 'longitude', 'sensor_1']]
+
+    df = df.append(md.data_bw)
+    df = df.append(md.data_fw)
+
+    return df
+
+
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.display_points_checkbox = QtWidgets.QCheckBox()
         self.gaussfilter_label = QtWidgets.QLabel("Smoothening: ")
         self.gaussfilter_spinbox = QtWidgets.QSpinBox()
         self.salinity_spinbox = QtWidgets.QDoubleSpinBox()
@@ -160,9 +173,12 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        # draw contour map
+        # draw contour map or circles
         sal_val = self.salinity_spinbox.value()
-        self.draw_contour_map(m_data, sal_val)
+        if self.display_points_checkbox.isChecked():
+            self.draw_points(m_data, sal_val)
+        else:
+            self.draw_contour_map(m_data, sal_val)
 
         # convert map to bytes and set html to webview
         data = io.BytesIO()
@@ -175,45 +191,56 @@ class map_view(QtWidgets.QMainWindow):
 
     # add a marker for each measurement in the given color
     # If to many markers are created (around >5000), view will not render
-    def add_markers(self, df: pd.DataFrame, color: str):
+    def draw_circle_markers(self, df: pd.DataFrame, color: str):
         for index, row in df.iterrows():
             coords = [row['latitude'], row['longitude']]
-            folium.vector_layers.CircleMarker(
+            folium.vector_layers.Circle(
                 location=coords, radius=5, color=color, fill=True, fillOpacity=1.0, fillColor=color
             ).add_to(self.fol_map)
 
-    # draw a convex polygon over the given points. Much faster than markers, though not as accurate
-    def draw_polygon(self, df: pd.DataFrame, color: str):
-        try:
-            lat_point_list = df['latitude'].tolist()
-            lon_point_list = df['longitude'].tolist()
-        except:
-            # empty df or some other error
-            print("Couldn't draw polygon")
-            return
+    def draw_points(self, md: map_data, sal_val: float):
+        df = create_salinity_df(md)
 
-        polygon_geom = Polygon(zip(lon_point_list, lat_point_list))
-        polygon_geom = polygon_geom.convex_hull
-        polygon_geom = polygon_geom.difference(self.ger_polygon)
-        folium.GeoJson(
-            polygon_geom,
-            style_function=lambda feature: {
-                'fillColor': color,
-                'color': color,
-                'weight': 1,
-                'fillOpacity': 0.5,
-            }
-        ).add_to(self.fol_map)
+        # color stuff for the map
+        sal_min = df['sensor_1'].min()
+        sal_max = df['sensor_1'].max()
+        # make sure salinity is between min and max
+        if (sal_val < sal_min):
+            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            colors = ['#77b5d4', '#06618f']
+        elif (sal_val > sal_max):
+            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            colors = ['#b5212f', '#de7881']
+        else:
+            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val),
+                      sal_max]
+            colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
+
+        # scale values for colors
+        col_map = branca.colormap.StepColormap(colors, vmin=sal_min, vmax=sal_max, index=levels)
+        col_map.caption = "Salinity in PSU"
+
+        # reduce dataframe size
+        df = self.reduce_dataframe_size(df)
+
+        for i in range(len(colors)):
+            points = df[df['sensor_1'].between(levels[i], levels[i + 1])]
+            self.draw_circle_markers(points, colors[i])
+
+        # add legend
+        self.fol_map.add_child(col_map)
+
+    # TODO: rework this, use for demo purposes only !!!
+    def reduce_dataframe_size(self, df: pd.DataFrame):
+        target_size = 2000
+        step_size = int(len(df.index) / target_size)
+        df = df.iloc[::step_size, :]
+
+        return df
 
     # draw contour map
     def draw_contour_map(self, md: map_data, sal_val: float):
-        # construct dataframe with salinity
-        df = md.data_obs[['latitude', 'longitude', 'sensor_1']]
-        md.data_bw = md.data_bw[['latitude', 'longitude', 'sensor_1']]
-        md.data_fw = md.data_fw[['latitude', 'longitude', 'sensor_1']]
-
-        df = df.append(md.data_bw)
-        df = df.append(md.data_fw)
+        df = create_salinity_df(md)
 
         # color stuff for the map
         sal_min = df['sensor_1'].min()
@@ -248,7 +275,7 @@ class map_view(QtWidgets.QMainWindow):
         z_mesh = griddata((x_data, y_data), z_data, (x_mesh, y_mesh), method='linear')
 
         # optional gaussian filter to smoothen contour map
-        if(self.gaussfilter_spinbox.value() > 0):
+        if (self.gaussfilter_spinbox.value() > 0):
             gauss_strength = self.gaussfilter_spinbox.value()
             sigma = [gauss_strength, gauss_strength]
             z_mesh = sp.ndimage.filters.gaussian_filter(z_mesh, sigma, mode='constant')
@@ -340,6 +367,9 @@ class map_view(QtWidgets.QMainWindow):
         self.gaussfilter_spinbox.setToolTip("The amount by which the contour map is smoothened. 0 means no "
                                             "smoothening, while 5 is the highest amount. The smoothening "
                                             "effect is achieved through a Gaussian blur.")
+        display_points_label = QtWidgets.QLabel("Display data as points: ")
+        self.display_points_checkbox.setChecked(False)
+        self.display_points_checkbox.clicked.connect(lambda: self.show_points_signal())
 
         # build upper layout
         status_layout = QtWidgets.QHBoxLayout()
@@ -347,6 +377,8 @@ class map_view(QtWidgets.QMainWindow):
         status_layout.addStretch(1)
         status_layout.addWidget(self.gaussfilter_label)
         status_layout.addWidget(self.gaussfilter_spinbox)
+        status_layout.addWidget(display_points_label)
+        status_layout.addWidget(self.display_points_checkbox)
 
         # build lower layout
         control_layout = QtWidgets.QHBoxLayout()
@@ -378,6 +410,11 @@ class map_view(QtWidgets.QMainWindow):
         else:
             if self.salinity_spinbox.value != self.slider.value:
                 self.slider.setValue(self.salinity_spinbox.value() * 100.0)
+
+    def show_points_signal(self):
+        state = self.display_points_checkbox.isChecked() == 0
+        self.gaussfilter_label.setVisible(state)
+        self.gaussfilter_spinbox.setVisible(state)
 
 
 if __name__ == "__main__":
