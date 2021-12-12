@@ -1,15 +1,12 @@
 import io
-import json
 import sys
 import time
 
 import folium
 import sqlite3
 import pandas as pd
-import shapely.geometry
 from PySide2 import QtWidgets, QtWebEngineWidgets, QtCore
 from dataclasses import dataclass
-from shapely.geometry import Polygon
 from shapely.geometry import shape
 import geojson
 import geojsoncontour
@@ -25,9 +22,8 @@ start_coords = [54.12, 8.37]
 min_time = QtCore.QDateTime(QtCore.QDate(2013, 1, 1), QtCore.QTime(0, 0))
 max_time = QtCore.QDateTime(QtCore.QDate(2013, 12, 31), QtCore.QTime(23, 59))
 
-# start and end times when launching the program
+# start time when launching the program
 begin_start_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(0, 0))
-begin_end_time = QtCore.QDateTime(QtCore.QDate(2013, 6, 1), QtCore.QTime(12, 0))
 
 
 @dataclass
@@ -165,7 +161,7 @@ class map_view(QtWidgets.QMainWindow):
         self.date_label.setText("Updating...")
 
         start_datetime = self.start_datetime_edit.dateTime()
-        end_datetime = self.end_datetime_edit.dateTime()
+        end_datetime = self.start_datetime_edit.dateTime().addDays(1)
 
         # get data
         m_data = self.get_data_for_time_range(start_datetime, end_datetime)
@@ -173,6 +169,7 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
+        # TODO: add handling of empty data frame
         # draw contour map or circles
         sal_val = self.salinity_spinbox.value()
         if self.display_points_checkbox.isChecked():
@@ -233,6 +230,8 @@ class map_view(QtWidgets.QMainWindow):
     # TODO: rework this, use for demo purposes only !!!
     def reduce_dataframe_size(self, df: pd.DataFrame):
         target_size = 2000
+        if len(df.index) < target_size:
+            return df
         step_size = int(len(df.index) / target_size)
         df = df.iloc[::step_size, :]
 
@@ -303,22 +302,10 @@ class map_view(QtWidgets.QMainWindow):
         # add legend
         self.fol_map.add_child(col_map)
 
-    # add salinity values to extrapolated points
-    # TODO: this is slow as hell
-    # TODO: should probably be done when loading db
-    def process_extrapolated_data(self, df: pd.DataFrame):
-        sal_list = []
-        for index, row in df.iterrows():
-            id = row['label']
-            mask = self.runtime_ds.data_obs['label'].values == id
-            sal = self.runtime_ds.data_obs[mask]['sensor_1'].values[0]
-            sal_list.append(sal)
-        df['sensor_1'] = sal_list
-
     def update_finished(self):
         # update label
         self.date_label.setText(
-            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.end_datetime_edit.dateTime().toString())
+            "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.start_datetime_edit.dateTime().addDays(1).toString())
 
     def start_datetime_changed(self):
         self.end_datetime_edit.setDateTimeRange(self.start_datetime_edit.dateTime(), max_time)
@@ -332,21 +319,13 @@ class map_view(QtWidgets.QMainWindow):
         self.start_datetime_edit.setMinimumWidth(120)
         self.start_datetime_edit.dateTimeChanged.connect(lambda: self.start_datetime_changed())
 
-        # build end date time edit
-        self.end_datetime_edit.setDateTimeRange(begin_start_time, max_time)
-        self.end_datetime_edit.setCalendarPopup(1)
-        self.end_datetime_edit.setDateTime(begin_end_time)
-        self.end_datetime_edit.setMinimumWidth(120)
-
         # build button
         button = QtWidgets.QPushButton("Update")
         button.clicked.connect(lambda: self.update_map())
 
         # build labels
-        from_label = QtWidgets.QLabel("Analyze Data from: ")
+        from_label = QtWidgets.QLabel("Analyze Data for 24 hours, starting from: ")
         from_label.setFixedHeight(20)
-        until_label = QtWidgets.QLabel(" until: ")
-        until_label.setFixedHeight(20)
 
         # build slider stuff
         self.slider.setFixedWidth(300)
@@ -384,8 +363,6 @@ class map_view(QtWidgets.QMainWindow):
         control_layout = QtWidgets.QHBoxLayout()
         control_layout.addWidget(from_label)
         control_layout.addWidget(self.start_datetime_edit)
-        control_layout.addWidget(until_label)
-        control_layout.addWidget(self.end_datetime_edit)
         control_layout.addWidget(button)
         control_layout.addStretch(1)
         control_layout.addWidget(slider_current_label)
