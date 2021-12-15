@@ -89,6 +89,9 @@ def create_salinity_df(md: map_data):
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.update_button = QtWidgets.QPushButton("Update")
+        self.next_day_button = QtWidgets.QPushButton(">")
+        self.prev_day_button = QtWidgets.QPushButton("<")
         self.display_points_checkbox = QtWidgets.QCheckBox()
         self.gaussfilter_label = QtWidgets.QLabel("Smoothening: ")
         self.gaussfilter_spinbox = QtWidgets.QSpinBox()
@@ -99,7 +102,6 @@ class map_view(QtWidgets.QMainWindow):
         self.web_view = QtWebEngineWidgets.QWebEngineView()
         self.web_view.loadFinished.connect(lambda: self.update_finished())
         self.start_datetime_edit = QtWidgets.QDateTimeEdit()
-        self.end_datetime_edit = QtWidgets.QDateTimeEdit()
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.runtime_ds = map_data()
 
@@ -156,9 +158,16 @@ class map_view(QtWidgets.QMainWindow):
     def update_map(self):
         print("started updating...")
         start_time = time.time()
-        # TODO: make this work properly
         # set label to updating
         self.date_label.setText("Updating...")
+
+        # deactivate UI
+        self.start_datetime_edit.setEnabled(False)
+        self.prev_day_button.setEnabled(False)
+        self.next_day_button.setEnabled(False)
+        self.update_button.setEnabled(False)
+
+        QtCore.QCoreApplication.processEvents()
 
         start_datetime = self.start_datetime_edit.dateTime()
         end_datetime = self.start_datetime_edit.dateTime().addDays(1)
@@ -169,7 +178,6 @@ class map_view(QtWidgets.QMainWindow):
         # rebuild map
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
 
-        # TODO: add handling of empty data frame
         # draw contour map or circles
         sal_val = self.salinity_spinbox.value()
         if self.display_points_checkbox.isChecked():
@@ -182,8 +190,15 @@ class map_view(QtWidgets.QMainWindow):
         self.fol_map.location = start_coords
         self.fol_map.save(data, close_file=False)
         html = data.getvalue().decode()
-        write_html_to_file(html)
         self.web_view.setHtml(html)
+        self.web_view.setVisible(True)
+
+        # reactivate UI
+        self.start_datetime_edit.setEnabled(True)
+        self.prev_day_button.setEnabled(start_datetime.addDays(-1) >= min_time)
+        self.next_day_button.setEnabled(start_datetime.addDays(1) <= max_time)
+        self.update_button.setEnabled(True)
+
         print("updating done in " + str(time.time() - start_time) + " seconds")
 
     # add a marker for each measurement in the given color
@@ -197,19 +212,21 @@ class map_view(QtWidgets.QMainWindow):
 
     def draw_points(self, md: map_data, sal_val: float):
         df = create_salinity_df(md)
+        if df.empty:
+            return
 
         # color stuff for the map
         sal_min = df['sensor_1'].min()
         sal_max = df['sensor_1'].max()
         # make sure salinity is between min and max
-        if (sal_val < sal_min):
+        if sal_val < sal_min:
             levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
             colors = ['#77b5d4', '#06618f']
-        elif (sal_val > sal_max):
+        elif sal_val > sal_max:
             levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
             colors = ['#b5212f', '#de7881']
         else:
-            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val),
+            levels = [sal_min, sal_min + 0.7 * (sal_val - sal_min), sal_val, sal_val + 0.3 * (sal_max - sal_val),
                       sal_max]
             colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
 
@@ -240,19 +257,21 @@ class map_view(QtWidgets.QMainWindow):
     # draw contour map
     def draw_contour_map(self, md: map_data, sal_val: float):
         df = create_salinity_df(md)
+        if df.empty:
+            return
 
         # color stuff for the map
         sal_min = df['sensor_1'].min()
         sal_max = df['sensor_1'].max()
         # make sure salinity is between min and max
-        if (sal_val < sal_min):
+        if sal_val < sal_min:
             levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
             colors = ['#77b5d4', '#06618f']
-        elif (sal_val > sal_max):
+        elif sal_val > sal_max:
             levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
             colors = ['#b5212f', '#de7881']
         else:
-            levels = [sal_min, sal_min + 0.5 * (sal_val - sal_min), sal_val, sal_val + 0.5 * (sal_max - sal_val),
+            levels = [sal_min, sal_min + 0.7 * (sal_val - sal_min), sal_val, sal_val + 0.3 * (sal_max - sal_val),
                       sal_max]
             colors = ['#b5212f', '#de7881', '#77b5d4', '#06618f']
 
@@ -274,7 +293,7 @@ class map_view(QtWidgets.QMainWindow):
         z_mesh = griddata((x_data, y_data), z_data, (x_mesh, y_mesh), method='linear')
 
         # optional gaussian filter to smoothen contour map
-        if (self.gaussfilter_spinbox.value() > 0):
+        if self.gaussfilter_spinbox.value() > 0:
             gauss_strength = self.gaussfilter_spinbox.value()
             sigma = [gauss_strength, gauss_strength]
             z_mesh = sp.ndimage.filters.gaussian_filter(z_mesh, sigma, mode='constant')
@@ -307,9 +326,6 @@ class map_view(QtWidgets.QMainWindow):
         self.date_label.setText(
             "Currently displaying: " + self.start_datetime_edit.dateTime().toString() + " to " + self.start_datetime_edit.dateTime().addDays(1).toString())
 
-    def start_datetime_changed(self):
-        self.end_datetime_edit.setDateTimeRange(self.start_datetime_edit.dateTime(), max_time)
-
     # create the GUI consisting of a map, a date-time selection field and an update button
     def create_gui(self):
         # build start date time edit
@@ -317,11 +333,18 @@ class map_view(QtWidgets.QMainWindow):
         self.start_datetime_edit.setCalendarPopup(1)
         self.start_datetime_edit.setDateTime(begin_start_time)
         self.start_datetime_edit.setMinimumWidth(120)
-        self.start_datetime_edit.dateTimeChanged.connect(lambda: self.start_datetime_changed())
+        self.start_datetime_edit.dateChanged.connect(lambda: self.update_map())
+        self.prev_day_button.setFixedWidth(50)
+        self.prev_day_button.setToolTip("Previous Day")
+        self.prev_day_button.clicked.connect(lambda: self.start_datetime_edit.setDateTime(
+            self.start_datetime_edit.dateTime().addDays(-1)))
+        self.next_day_button.setFixedWidth(50)
+        self.next_day_button.setToolTip("Next Day")
+        self.next_day_button.clicked.connect(lambda: self.start_datetime_edit.setDateTime(
+            self.start_datetime_edit.dateTime().addDays(1)))
 
         # build button
-        button = QtWidgets.QPushButton("Update")
-        button.clicked.connect(lambda: self.update_map())
+        self.update_button.clicked.connect(lambda: self.update_map())
 
         # build labels
         from_label = QtWidgets.QLabel("Analyze Data for 24 hours, starting from: ")
@@ -348,7 +371,7 @@ class map_view(QtWidgets.QMainWindow):
                                             "effect is achieved through a Gaussian blur.")
         display_points_label = QtWidgets.QLabel("Display data as points: ")
         self.display_points_checkbox.setChecked(False)
-        self.display_points_checkbox.clicked.connect(lambda: self.show_points_signal())
+        self.display_points_checkbox.clicked.connect(lambda: self.show_points_slot())
 
         # build upper layout
         status_layout = QtWidgets.QHBoxLayout()
@@ -362,9 +385,11 @@ class map_view(QtWidgets.QMainWindow):
         # build lower layout
         control_layout = QtWidgets.QHBoxLayout()
         control_layout.addWidget(from_label)
+        control_layout.addWidget(self.prev_day_button)
         control_layout.addWidget(self.start_datetime_edit)
-        control_layout.addWidget(button)
+        control_layout.addWidget(self.next_day_button)
         control_layout.addStretch(1)
+        control_layout.addWidget(self.update_button)
         control_layout.addWidget(slider_current_label)
         control_layout.addWidget(self.salinity_spinbox)
         control_layout.addWidget(self.slider)
@@ -388,7 +413,7 @@ class map_view(QtWidgets.QMainWindow):
             if self.salinity_spinbox.value != self.slider.value:
                 self.slider.setValue(self.salinity_spinbox.value() * 100.0)
 
-    def show_points_signal(self):
+    def show_points_slot(self):
         state = self.display_points_checkbox.isChecked() == 0
         self.gaussfilter_label.setVisible(state)
         self.gaussfilter_spinbox.setVisible(state)
