@@ -220,10 +220,10 @@ class map_view(QtWidgets.QMainWindow):
         sal_max = df['sensor_1'].max()
         # make sure salinity is between min and max
         if sal_val < sal_min:
-            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            levels = [sal_min, sal_min + 0.3 * (sal_max - sal_min), sal_max]
             colors = ['#77b5d4', '#06618f']
         elif sal_val > sal_max:
-            levels = [sal_min, sal_min + 0.5 * (sal_max - sal_min), sal_max]
+            levels = [sal_min, sal_min + 0.7 * (sal_max - sal_min), sal_max]
             colors = ['#b5212f', '#de7881']
         else:
             levels = [sal_min, sal_min + 0.7 * (sal_val - sal_min), sal_val, sal_val + 0.3 * (sal_max - sal_val),
