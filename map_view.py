@@ -89,6 +89,7 @@ def create_salinity_df(md: map_data):
 class map_view(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.radarplot_webview = QtWebEngineWidgets.QWebEngineView()
         self.update_button = QtWidgets.QPushButton("Update")
         self.next_day_button = QtWidgets.QPushButton(">")
         self.prev_day_button = QtWidgets.QPushButton("<")
@@ -99,8 +100,8 @@ class map_view(QtWidgets.QMainWindow):
         self.date_label = QtWidgets.QLabel()
         self.date_label.setFixedHeight(20)
         self.fol_map = folium.Map(location=start_coords, zoom_start=10)
-        self.web_view = QtWebEngineWidgets.QWebEngineView()
-        self.web_view.loadFinished.connect(lambda: self.update_finished())
+        self.map_webview = QtWebEngineWidgets.QWebEngineView()
+        self.map_webview.loadFinished.connect(lambda: self.update_finished())
         self.start_datetime_edit = QtWidgets.QDateTimeEdit()
         self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.runtime_ds = map_data()
@@ -190,8 +191,8 @@ class map_view(QtWidgets.QMainWindow):
         self.fol_map.location = start_coords
         self.fol_map.save(data, close_file=False)
         html = data.getvalue().decode()
-        self.web_view.setHtml(html)
-        self.web_view.setVisible(True)
+        self.map_webview.setHtml(html)
+        self.map_webview.setVisible(True)
 
         # reactivate UI
         self.start_datetime_edit.setEnabled(True)
@@ -394,10 +395,16 @@ class map_view(QtWidgets.QMainWindow):
         control_layout.addWidget(self.salinity_spinbox)
         control_layout.addWidget(self.slider)
 
+        # build webview layout
+        webview_layout = QtWidgets.QHBoxLayout()
+        webview_layout.addWidget(self.map_webview)
+        webview_layout.addWidget(self.radarplot_webview)
+        self.radarplot_webview.setFixedWidth(400)
+
         # build main widget
         main_widget = QtWidgets.QWidget()
         main_layout = QtWidgets.QVBoxLayout()
-        main_layout.addWidget(self.web_view)
+        main_layout.addLayout(webview_layout)
         main_layout.addLayout(status_layout)
         main_layout.addLayout(control_layout)
         main_widget.setLayout(main_layout)

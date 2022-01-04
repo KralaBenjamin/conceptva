@@ -31,13 +31,34 @@ def write_into_database():
 
 # TODO: add other sensors here?
 def process_extrapolated_data(df_ext: pd.DataFrame, df_obs: pd.DataFrame):
-    sal_list = []
+    sen_list = [[],[],[],[],[],[],[]]
     for index, row in df_ext.iterrows():
         id = row['label']
         mask = df_obs['label'].values == id
-        sal = df_obs[mask]['sensor_1'].values[0]
-        sal_list.append(sal)
-    df_ext['sensor_1'] = sal_list
+
+        sen1 = df_obs[mask]['sensor_1'].values[0]
+        sen2 = df_obs[mask]['sensor_2'].values[0]
+        sen3 = df_obs[mask]['sensor_3'].values[0]
+        sen4 = df_obs[mask]['sensor_4'].values[0]
+        sen5 = df_obs[mask]['sensor_5'].values[0]
+        sen6 = df_obs[mask]['sensor_6'].values[0]
+        sen7 = df_obs[mask]['sensor_7'].values[0]
+
+        sen_list[0].append(sen1)
+        sen_list[1].append(sen2)
+        sen_list[2].append(sen3)
+        sen_list[3].append(sen4)
+        sen_list[4].append(sen5)
+        sen_list[5].append(sen6)
+        sen_list[6].append(sen7)
+
+    df_ext['sensor_1'] = sen_list[0]
+    df_ext['sensor_2'] = sen_list[1]
+    df_ext['sensor_3'] = sen_list[2]
+    df_ext['sensor_4'] = sen_list[3]
+    df_ext['sensor_5'] = sen_list[4]
+    df_ext['sensor_6'] = sen_list[5]
+    df_ext['sensor_7'] = sen_list[6]
 
 if __name__ == "__main__":
     print("started building db...")
