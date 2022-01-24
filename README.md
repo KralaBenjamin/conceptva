@@ -1,0 +1,1 @@
+Dies ist das Repository von Gruppe D im Modul Visual Analytics für raum-zeitliche Daten WiSe 21/22. Wir bearbeiten die Aufgabenstellung A zum Datensatz "Flaschenpost".
